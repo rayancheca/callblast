@@ -124,6 +124,36 @@ export function processOrder(repo) {
 	}
 }
 
+func TestExtractTSFile_ClassMethods(t *testing.T) {
+	src := []byte(`
+class UserService {
+  async findById(id: string): Promise<User> {
+    return this.repo.find(id);
+  }
+
+  save(user: User): void {
+    this.repo.save(user);
+  }
+}
+`)
+	funcs, _, err := ExtractTSFile("/tmp/service.ts", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	names := map[string]bool{}
+	for _, f := range funcs {
+		names[f.Name] = true
+	}
+
+	if !names["findById"] {
+		t.Errorf("expected findById to be extracted, got functions: %v", funcs)
+	}
+	if !names["save"] {
+		t.Errorf("expected save to be extracted, got functions: %v", funcs)
+	}
+}
+
 func TestExtractGoFile_BodyHash(t *testing.T) {
 	src1 := []byte(`package main
 

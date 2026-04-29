@@ -63,6 +63,33 @@ func ExtractTSFile(filePath string, src []byte) ([]FunctionDef, []CallSite, erro
 		})
 	}
 
+	// Extract class methods: match indented method declarations, skipping JS keywords
+	// and special method kinds (constructor, get, set accessors) that are not
+	// callable as regular functions in a call graph.
+	skipMethodNames := map[string]bool{
+		"constructor": true,
+		"get":         true,
+		"set":         true,
+	}
+	for _, m := range reMethodFunc.FindAllStringSubmatchIndex(content, -1) {
+		name := content[m[2]:m[3]]
+		if isJSKeyword(name) || skipMethodNames[name] {
+			continue
+		}
+		params := content[m[4]:m[5]]
+		lineNum := countLines(content, m[0])
+		sig := fmt.Sprintf("%s(%s)", name, params)
+		bodyHash := hashSubstring(content, m[0])
+		funcs = append(funcs, FunctionDef{
+			Name:      name,
+			File:      filePath,
+			Line:      lineNum,
+			Signature: sig,
+			BodyHash:  bodyHash,
+			Language:  "typescript",
+		})
+	}
+
 	// Collect all function calls per function (attribute calls to nearest enclosing function).
 	var calls []CallSite
 	for _, funcDef := range funcs {
