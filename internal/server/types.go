@@ -73,3 +73,18 @@ type ErrorPayload struct {
 type AnalysisResponse struct {
 	SessionID string `json:"sessionId"`
 }
+
+// GitHubPRRequest is the POST /api/github-pr body.
+type GitHubPRRequest struct {
+	PRURL    string `json:"prUrl"`
+	RepoPath string `json:"repoPath"`
+}
+
+// GitHubPRResponse carries the resolved branch names ready for /api/analyze.
+type GitHubPRResponse struct {
+	RepoPath   string `json:"repoPath"`
+	BaseBranch string `json:"baseBranch"`
+	HeadBranch string `json:"headBranch"`
+	PRNumber   int    `json:"prNumber"`
+	Repo       string `json:"repo"`
+}

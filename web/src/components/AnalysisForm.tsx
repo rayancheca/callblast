@@ -14,6 +14,10 @@ export default function AnalysisForm({ onSubmit, isRunning, progress, error }: A
   const [headBranch, setHeadBranch] = useState('')
   const [demoLoading, setDemoLoading] = useState(false)
   const [demoError, setDemoError] = useState<string | null>(null)
+  const [prURL, setPrURL] = useState('')
+  const [prLoading, setPrLoading] = useState(false)
+  const [prError, setPrError] = useState<string | null>(null)
+  const [prResolved, setPrResolved] = useState<{ repo: string; prNumber: number } | null>(null)
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -23,6 +27,30 @@ export default function AnalysisForm({ onSubmit, isRunning, progress, error }: A
       baseBranch: baseBranch.trim() || 'main',
       headBranch: headBranch.trim(),
     })
+  }
+
+  async function handleImportPR() {
+    if (!prURL.trim()) return
+    setPrLoading(true)
+    setPrError(null)
+    setPrResolved(null)
+    try {
+      const res = await fetch('/api/github-pr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prUrl: prURL.trim(), repoPath: repoPath.trim() || undefined }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message ?? `Server returned ${res.status}`)
+      setRepoPath(data.repoPath)
+      setBaseBranch(data.baseBranch)
+      setHeadBranch(data.headBranch)
+      setPrResolved({ repo: data.repo, prNumber: data.prNumber })
+    } catch (err) {
+      setPrError(err instanceof Error ? err.message : 'Failed to resolve PR')
+    } finally {
+      setPrLoading(false)
+    }
   }
 
   async function handleDemo() {
@@ -81,6 +109,46 @@ export default function AnalysisForm({ onSubmit, isRunning, progress, error }: A
         </div>
 
         <form className="form-body" onSubmit={handleSubmit}>
+          {/* GitHub PR import */}
+          <div className="form-field">
+            <label className="form-label" htmlFor="prURL">
+              Import from GitHub PR
+              <span className="form-label-optional"> — optional</span>
+            </label>
+            <div className="pr-row">
+              <input
+                id="prURL"
+                className="form-input mono"
+                type="url"
+                value={prURL}
+                onChange={e => { setPrURL(e.target.value); setPrResolved(null); setPrError(null) }}
+                placeholder="https://github.com/owner/repo/pull/123"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <button
+                type="button"
+                className="pr-import-btn"
+                onClick={handleImportPR}
+                disabled={prLoading || !prURL.trim() || isRunning}
+              >
+                {prLoading ? <span className="form-spinner pr-spinner" aria-hidden="true" /> : 'Import'}
+              </button>
+            </div>
+            {prError && <span className="pr-error">{prError}</span>}
+            {prResolved && (
+              <span className="pr-resolved">
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+                  <path d="M2 5l2.5 2.5L8 3" stroke="#16a34a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                {prResolved.repo} #{prResolved.prNumber} — branches filled below
+              </span>
+            )}
+            <span className="form-hint">Fills base/head branches automatically. Requires <span className="mono">GITHUB_TOKEN</span> env var for private repos.</span>
+          </div>
+
+          <div className="form-divider" aria-hidden="true"><span>or enter manually</span></div>
+
           <div className="form-field">
             <label className="form-label" htmlFor="repoPath">
               Repository path
@@ -410,6 +478,76 @@ export default function AnalysisForm({ onSubmit, isRunning, progress, error }: A
           margin-top: var(--space-2);
           font-size: var(--text-xs);
           color: #fca5a5;
+        }
+        .form-label-optional {
+          font-weight: 400;
+          text-transform: none;
+          letter-spacing: 0;
+          color: var(--text-dim);
+        }
+        .pr-row {
+          display: flex;
+          gap: var(--space-2);
+        }
+        .pr-row .form-input {
+          flex: 1;
+          min-width: 0;
+        }
+        .pr-import-btn {
+          flex-shrink: 0;
+          height: 36px;
+          padding: 0 var(--space-4);
+          background: var(--surface-3);
+          border: 1px solid var(--border-2);
+          border-radius: var(--radius-md);
+          color: var(--text-primary);
+          font-size: var(--text-sm);
+          font-weight: 500;
+          cursor: pointer;
+          transition: border-color var(--dur-fast), background var(--dur-fast);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 68px;
+        }
+        .pr-import-btn:hover:not(:disabled) {
+          border-color: var(--amber);
+          color: var(--amber);
+        }
+        .pr-import-btn:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
+        }
+        .pr-spinner {
+          border-color: rgba(230, 230, 230, 0.25) !important;
+          border-top-color: var(--text-secondary) !important;
+        }
+        .pr-error {
+          font-size: var(--text-xs);
+          color: #fca5a5;
+          margin-top: 2px;
+        }
+        .pr-resolved {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          font-size: var(--text-xs);
+          color: #4ade80;
+          margin-top: 2px;
+        }
+        .form-divider {
+          display: flex;
+          align-items: center;
+          gap: var(--space-3);
+          font-size: var(--text-xs);
+          color: var(--text-dim);
+        }
+        .form-divider::before,
+        .form-divider::after {
+          content: '';
+          flex: 1;
+          height: 1px;
+          background: var(--border);
         }
       `}</style>
     </div>

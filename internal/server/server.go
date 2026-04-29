@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/rayancheca/callblast/internal/github"
 )
 
 const (
@@ -69,6 +70,7 @@ func (s *Server) Run(staticDir string) error {
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/demo", s.handleDemo)
+	mux.HandleFunc("/api/github-pr", s.handleGitHubPR)
 
 	if staticDir != "" {
 		fs := http.FileServer(http.Dir(staticDir))
@@ -82,6 +84,45 @@ func (s *Server) Run(staticDir string) error {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleGitHubPR resolves a GitHub PR URL to its base/head branch names so the
+// frontend can skip manual branch entry. Reads GITHUB_TOKEN from env if set.
+func (s *Server) handleGitHubPR(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req GitHubPRRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, ErrorPayload{Message: "invalid request body"})
+		return
+	}
+	if req.PRURL == "" {
+		writeJSON(w, http.StatusBadRequest, ErrorPayload{Message: "prUrl is required"})
+		return
+	}
+
+	token := os.Getenv("GITHUB_TOKEN")
+	info, err := github.FetchPRInfo(req.PRURL, token)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, ErrorPayload{Message: err.Error()})
+		return
+	}
+
+	repoPath := req.RepoPath
+	if repoPath == "" {
+		repoPath = s.repoPath
+	}
+
+	writeJSON(w, http.StatusOK, GitHubPRResponse{
+		RepoPath:   repoPath,
+		BaseBranch: info.BaseBranch,
+		HeadBranch: info.HeadBranch,
+		PRNumber:   info.Number,
+		Repo:       info.Owner + "/" + info.Repo,
+	})
 }
 
 // handleDemo returns a pre-filled AnalysisRequest pointing at the server's own
