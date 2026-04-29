@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -43,6 +44,7 @@ type Server struct {
 	semaphore chan struct{}
 	analyzer  func(ctx context.Context, req AnalysisRequest, events chan<- GraphEvent)
 	port      int
+	repoPath  string // working directory, used by /api/demo
 }
 
 // AnalyzerFunc is the signature of the analysis function accepted by the server.
@@ -50,11 +52,13 @@ type AnalyzerFunc func(ctx context.Context, req AnalysisRequest, events chan<- G
 
 // New creates a new Server with the given analyzer function.
 func New(port int, analyzer AnalyzerFunc) *Server {
+	cwd, _ := os.Getwd()
 	return &Server{
 		sessions:  make(map[string]*session),
 		semaphore: make(chan struct{}, maxConcurrentSessions),
 		analyzer:  analyzer,
 		port:      port,
+		repoPath:  cwd,
 	}
 }
 
@@ -64,6 +68,7 @@ func (s *Server) Run(staticDir string) error {
 	mux.HandleFunc("/api/analyze", s.handleAnalyze)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/api/health", s.handleHealth)
+	mux.HandleFunc("/api/demo", s.handleDemo)
 
 	if staticDir != "" {
 		fs := http.FileServer(http.Dir(staticDir))
@@ -77,6 +82,20 @@ func (s *Server) Run(staticDir string) error {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleDemo returns a pre-filled AnalysisRequest pointing at the server's own
+// repository (cwd), comparing HEAD~1 → HEAD. Handy for a one-click "try it out".
+func (s *Server) handleDemo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, http.StatusOK, AnalysisRequest{
+		RepoPath:   s.repoPath,
+		BaseBranch: "HEAD~1",
+		HeadBranch: "HEAD",
+	})
 }
 
 func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {

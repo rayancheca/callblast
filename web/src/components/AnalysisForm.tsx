@@ -12,6 +12,8 @@ export default function AnalysisForm({ onSubmit, isRunning, progress, error }: A
   const [repoPath, setRepoPath] = useState('')
   const [baseBranch, setBaseBranch] = useState('main')
   const [headBranch, setHeadBranch] = useState('')
+  const [demoLoading, setDemoLoading] = useState(false)
+  const [demoError, setDemoError] = useState<string | null>(null)
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -21,6 +23,23 @@ export default function AnalysisForm({ onSubmit, isRunning, progress, error }: A
       baseBranch: baseBranch.trim() || 'main',
       headBranch: headBranch.trim(),
     })
+  }
+
+  async function handleDemo() {
+    setDemoLoading(true)
+    setDemoError(null)
+    try {
+      const res = await fetch('/api/demo')
+      if (!res.ok) throw new Error(`Server returned ${res.status}`)
+      const data: AnalysisRequest = await res.json()
+      setRepoPath(data.repoPath)
+      setBaseBranch(data.baseBranch)
+      setHeadBranch(data.headBranch)
+    } catch (err) {
+      setDemoError(err instanceof Error ? err.message : 'Failed to load demo config')
+    } finally {
+      setDemoLoading(false)
+    }
   }
 
   return (
@@ -36,10 +55,29 @@ export default function AnalysisForm({ onSubmit, isRunning, progress, error }: A
               <line x1="11" y1="5.5" x2="9" y2="10.5" stroke="#737373" strokeWidth="0.8" />
             </svg>
             <h1 className="form-title">Analyze Blast Radius</h1>
+            <button
+              type="button"
+              className="demo-btn"
+              onClick={handleDemo}
+              disabled={demoLoading || isRunning}
+              aria-label="Load demo configuration"
+            >
+              {demoLoading ? (
+                <span className="form-spinner demo-spinner" aria-hidden="true" />
+              ) : (
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
+                  <polygon points="2,1 10,5.5 2,10" fill="currentColor" />
+                </svg>
+              )}
+              {demoLoading ? 'Loading…' : 'Try demo'}
+            </button>
           </div>
           <p className="form-subtitle">
             Trace every function your PR will break — before your teammates find them.
           </p>
+          {demoError && (
+            <p className="demo-error" role="alert">{demoError}</p>
+          )}
         </div>
 
         <form className="form-body" onSubmit={handleSubmit}>
@@ -338,6 +376,40 @@ export default function AnalysisForm({ onSubmit, isRunning, progress, error }: A
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
+        }
+        .demo-btn {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+          margin-left: auto;
+          padding: 4px 10px;
+          height: 26px;
+          background: transparent;
+          border: 1px solid var(--border-2);
+          border-radius: var(--radius-sm);
+          color: var(--text-secondary);
+          font-size: 11px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: color var(--dur-fast), border-color var(--dur-fast);
+          white-space: nowrap;
+        }
+        .demo-btn:hover:not(:disabled) {
+          color: var(--amber);
+          border-color: var(--amber);
+        }
+        .demo-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        .demo-spinner {
+          border-color: rgba(115, 115, 115, 0.3) !important;
+          border-top-color: var(--text-secondary) !important;
+        }
+        .demo-error {
+          margin-top: var(--space-2);
+          font-size: var(--text-xs);
+          color: #fca5a5;
         }
       `}</style>
     </div>
