@@ -82,6 +82,48 @@ func (s *Server) Handle() error {
 	}
 }
 
+func TestExtractTSFile_SelectorCalls(t *testing.T) {
+	src := []byte(`
+export function processOrder(repo) {
+  const order = repo.findById(id);
+  repo.save(order);
+  notify(order);
+}
+`)
+	_, calls, err := ExtractTSFile("/tmp/test.ts", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	qualified := map[string]bool{}
+	plain := map[string]bool{}
+	for _, c := range calls {
+		if strings.Contains(c.CalleeFunc, ".") {
+			qualified[c.CalleeFunc] = true
+		} else {
+			plain[c.CalleeFunc] = true
+		}
+	}
+
+	if !qualified["repo.findById"] {
+		t.Errorf("expected qualified call repo.findById, got: %v", calls)
+	}
+	if !qualified["repo.save"] {
+		t.Errorf("expected qualified call repo.save, got: %v", calls)
+	}
+	// notify() is a plain call — should still be captured
+	if !plain["notify"] {
+		t.Errorf("expected plain call notify, got: %v", calls)
+	}
+	// method names should NOT appear as plain calls when already emitted as qualified
+	if plain["findById"] {
+		t.Errorf("findById should not appear as a plain call (already in qualified form)")
+	}
+	if plain["save"] {
+		t.Errorf("save should not appear as a plain call (already in qualified form)")
+	}
+}
+
 func TestExtractGoFile_BodyHash(t *testing.T) {
 	src1 := []byte(`package main
 

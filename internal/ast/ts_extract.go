@@ -14,8 +14,12 @@ var (
 	reArrowFunc = regexp.MustCompile(`(?m)^(?:export\s+)?(?:const|let)\s+(\w+)\s*=\s*(?:async\s+)?\(([^)]*)\)\s*(?::\s*\S+\s*)?=>`)
 	// Match: foo = (...) => { inside class
 	reMethodFunc = regexp.MustCompile(`(?m)^\s+(?:async\s+)?(\w+)\s*\(([^)]*)\)\s*(?::\s*\S+\s*)?\{`)
-	// Match function calls: foo( or foo.bar(
+	// Match plain function calls: foo(
 	reCallExpr = regexp.MustCompile(`\b(\w+)\s*\(`)
+	// Match selector (method) calls: receiver.method( — captures receiver and method separately.
+	// This allows the call graph to store qualified call sites like "Service.validate" and
+	// later match them against extracted function names from the same file/module.
+	reSelectorCall = regexp.MustCompile(`\b(\w+)\.(\w+)\s*\(`)
 )
 
 // ExtractTSFile extracts function definitions and call sites from TypeScript/JavaScript source.
@@ -59,7 +63,7 @@ func ExtractTSFile(filePath string, src []byte) ([]FunctionDef, []CallSite, erro
 		})
 	}
 
-	// Collect all function calls per function (simple: attribute all calls to nearest function)
+	// Collect all function calls per function (attribute calls to nearest enclosing function).
 	var calls []CallSite
 	for _, funcDef := range funcs {
 		startLine := funcDef.Line
@@ -67,9 +71,31 @@ func ExtractTSFile(filePath string, src []byte) ([]FunctionDef, []CallSite, erro
 		callerQName := funcDef.QualifiedName()
 
 		for i := startLine; i < endLine && i < len(lines); i++ {
-			for _, m := range reCallExpr.FindAllStringSubmatch(lines[i], -1) {
+			line := lines[i]
+
+			// Emit selector calls (obj.method) with a qualified callee name so the
+			// call graph can distinguish service1.save() from service2.save().
+			selectorSeen := map[string]bool{}
+			for _, m := range reSelectorCall.FindAllStringSubmatch(line, -1) {
+				receiver, method := m[1], m[2]
+				if isJSKeyword(receiver) || isJSKeyword(method) {
+					continue
+				}
+				qualified := receiver + "." + method
+				selectorSeen[method] = true
+				calls = append(calls, CallSite{
+					CallerFunc: callerQName,
+					CalleeFunc: qualified,
+					File:       filePath,
+					Line:       i + 1,
+				})
+			}
+
+			// Emit plain calls (foo) only when not already covered by a selector match,
+			// to avoid double-counting method portions of selector calls.
+			for _, m := range reCallExpr.FindAllStringSubmatch(line, -1) {
 				callee := m[1]
-				if isJSKeyword(callee) || callee == funcDef.Name {
+				if isJSKeyword(callee) || callee == funcDef.Name || selectorSeen[callee] {
 					continue
 				}
 				calls = append(calls, CallSite{
