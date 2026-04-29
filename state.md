@@ -5,7 +5,7 @@ IN PROGRESS
 callblast — Finds every function your PR will actually break before your teammates do.
 
 ## Session count
-1
+2
 
 ## Completed steps
 1. Read all rule files and full project specification
@@ -36,16 +36,21 @@ callblast — Finds every function your PR will actually break before your teamm
 26. Security review fixes: ref injection, data race, goroutine leak, semaphore limit
 27. Pushed to https://github.com/rayancheca/callblast
 28. Updated project_history.md
+--- SESSION 2 ---
+29. Makefile — build, test, dev, run, clean targets
+30. TypeScript SelectorExpr — reSelectorCall regex emits qualified obj.method callee names; deduplicates plain form; new test
+31. Demo mode — GET /api/demo returns cwd + HEAD~1/HEAD; frontend "Try demo" button fills + handles errors
+32. GitHub PR integration — internal/github package + POST /api/github-pr endpoint + "Import from GitHub PR" form section
 
 ## In progress
-Session complete — ready for session 2
+Session 2 complete — ready for session 3
 
-## Next steps (session 2)
-1. Consider adding TypeScript callee resolution via SelectorExpr (HIGH-3 from review)
-2. Add a "demo mode" that uses this repo itself as the subject
-3. Add a Makefile for: make build, make test, make dev, make run
-4. Consider adding GitHub PR integration (fetch diff via GH API instead of local git)
-5. Screenshot the UI for README
+## Next steps (session 3)
+1. Screenshot the running UI for README (need a live analysis to capture graph, detail panel, impact list)
+2. Add Playwright E2E tests for: form submission, demo button, PR import, graph rendering
+3. Consider adding TypeScript class method extraction (currently only free functions and arrow functions)
+4. Consider a --demo CLI flag that auto-opens the browser and runs the demo on launch
+5. Consider adding a GitHub Actions CI workflow
 
 ## Blockers
 None
@@ -55,7 +60,9 @@ Visual direction: dark precision analytics — graph is the hero, amber=#f59e0b 
 Architecture: go/ast → semantic diff → call graph → BFS → WebSocket stream → D3 force simulation
 Port: 7332 (default)
 Frontend: web/dist/ (built); dev server: cd web && npm run dev
+GITHUB_TOKEN env var required for private repos; optional for public (rate limiting)
 
 ## Git log
-a3871cc feat: initial implementation of CallBlast PR blast-radius analyzer
-ede0823 fix: security hardening and concurrency safety
+db96d30 feat: Makefile + TypeScript SelectorExpr call site resolution
+aeb1f92 feat: demo mode — /api/demo endpoint and Try demo button
+7c655ec feat: GitHub PR integration — resolve branch names from PR URL
