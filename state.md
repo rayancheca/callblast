@@ -1,5 +1,5 @@
 ## Status
-IN PROGRESS
+COMPLETE
 
 ## Project
 callblast — Finds every function your PR will actually break before your teammates do.
@@ -41,16 +41,23 @@ callblast — Finds every function your PR will actually break before your teamm
 30. TypeScript SelectorExpr — reSelectorCall regex emits qualified obj.method callee names; deduplicates plain form; new test
 31. Demo mode — GET /api/demo returns cwd + HEAD~1/HEAD; frontend "Try demo" button fills + handles errors
 32. GitHub PR integration — internal/github package + POST /api/github-pr endpoint + "Import from GitHub PR" form section
+--- SESSION 3 ---
+33. GitHub Actions CI — go-test (race) + frontend-build jobs
+34. --demo flag — auto-opens browser after server starts (darwin/linux/windows)
+35. TypeScript class method extraction — reMethodFunc now used; skips JS keywords + constructor/get/set
+36. Fix .gitignore — narrowed callblast → /callblast so cmd/callblast/main.go is now tracked
+37. Playwright E2E tests — 11/11 pass: page load, form validation, demo btn, PR import, full pipeline, detail panel, impact list, reset
+38. Live screenshots — 6 screenshots from real analysis run, added to README
+39. README updated with screenshots, --demo flag, Makefile usage, updated language support table
 
 ## In progress
-Session 2 complete — ready for session 3
+All sessions complete. Project is shipped.
 
-## Next steps (session 3)
-1. Screenshot the running UI for README (need a live analysis to capture graph, detail panel, impact list)
-2. Add Playwright E2E tests for: form submission, demo button, PR import, graph rendering
-3. Consider adding TypeScript class method extraction (currently only free functions and arrow functions)
-4. Consider a --demo CLI flag that auto-opens the browser and runs the demo on launch
-5. Consider adding a GitHub Actions CI workflow
+## Next steps
+None — project is complete. Optional future work:
+- Larger repo benchmarks (10k+ file repos)
+- Tree-sitter based TS extraction for higher precision
+- GitHub Actions badge on README (will appear once CI runs)
 
 ## Blockers
 None
