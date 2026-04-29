@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -58,7 +59,7 @@ func Process(input string) string {
 	}
 
 	events := make(chan server.GraphEvent, 128)
-	RunAnalysis(req, events)
+	RunAnalysis(context.Background(), req, events)
 
 	var nodeEvents []server.GraphNodePayload
 	var edgeEvents []server.GraphEdgePayload

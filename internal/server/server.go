@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -13,36 +14,47 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const (
+	maxConcurrentSessions = 10
+	sessionTTL            = 5 * time.Minute
+	analysisTimeout       = 2 * time.Minute
+)
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 4096,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // dev mode; restrict in production
+		return true // developer tool — runs locally only
 	},
 }
 
-// session stores the event channel for a running analysis.
+// session stores buffered events and a cancel func for the running analysis.
 type session struct {
-	events chan GraphEvent
-	done   bool
 	mu     sync.Mutex
 	buffer []GraphEvent
+	done   bool
+	cancel context.CancelFunc
 }
 
 // Server manages analysis sessions and WebSocket connections.
 type Server struct {
-	mu       sync.Mutex
-	sessions map[string]*session
-	analyzer func(req AnalysisRequest, events chan<- GraphEvent)
-	port     int
+	mu        sync.Mutex
+	sessions  map[string]*session
+	semaphore chan struct{}
+	analyzer  func(ctx context.Context, req AnalysisRequest, events chan<- GraphEvent)
+	port      int
 }
 
+// AnalyzerFunc is the signature of the analysis function accepted by the server.
+type AnalyzerFunc func(ctx context.Context, req AnalysisRequest, events chan<- GraphEvent)
+
 // New creates a new Server with the given analyzer function.
-func New(port int, analyzer func(req AnalysisRequest, events chan<- GraphEvent)) *Server {
+func New(port int, analyzer AnalyzerFunc) *Server {
 	return &Server{
-		sessions: make(map[string]*session),
-		analyzer: analyzer,
-		port:     port,
+		sessions:  make(map[string]*session),
+		semaphore: make(chan struct{}, maxConcurrentSessions),
+		analyzer:  analyzer,
+		port:      port,
 	}
 }
 
@@ -53,7 +65,6 @@ func (s *Server) Run(staticDir string) error {
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/api/health", s.handleHealth)
 
-	// Serve static frontend if directory exists
 	if staticDir != "" {
 		fs := http.FileServer(http.Dir(staticDir))
 		mux.Handle("/", fs)
@@ -85,17 +96,36 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID := newSessionID()
-	events := make(chan GraphEvent, 256)
+	// Enforce concurrency limit — reject if at capacity
+	select {
+	case s.semaphore <- struct{}{}:
+	default:
+		writeJSON(w, http.StatusTooManyRequests, ErrorPayload{Message: "too many concurrent analyses; try again shortly"})
+		return
+	}
 
-	sess := &session{events: events, buffer: make([]GraphEvent, 0, 64)}
+	sessionID := newSessionID()
+	ctx, cancel := context.WithTimeout(context.Background(), analysisTimeout)
+
+	sess := &session{
+		buffer: make([]GraphEvent, 0, 64),
+		cancel: cancel,
+	}
+
 	s.mu.Lock()
 	s.sessions[sessionID] = sess
 	s.mu.Unlock()
 
-	// Start analysis in background, buffer events for WebSocket to pick up
+	events := make(chan GraphEvent, 256)
+
 	go func() {
-		go s.analyzer(req, events)
+		defer func() {
+			cancel()
+			<-s.semaphore
+		}()
+
+		s.analyzer(ctx, req, events)
+
 		for evt := range events {
 			sess.mu.Lock()
 			sess.buffer = append(sess.buffer, evt)
@@ -104,14 +134,17 @@ func (s *Server) handleAnalyze(w http.ResponseWriter, r *http.Request) {
 			}
 			sess.mu.Unlock()
 		}
+
 		sess.mu.Lock()
 		sess.done = true
 		sess.mu.Unlock()
 
-		// Clean up session after 5 minutes
-		time.AfterFunc(5*time.Minute, func() {
+		// Evict session after TTL
+		time.AfterFunc(sessionTTL, func() {
 			s.mu.Lock()
-			delete(s.sessions, sessionID)
+			if s2, ok := s.sessions[sessionID]; ok && s2 == sess {
+				delete(s.sessions, sessionID)
+			}
 			s.mu.Unlock()
 		})
 	}()
@@ -141,15 +174,17 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// Stream all buffered and future events
 	sent := 0
 	for {
+		// Copy new events under the lock to avoid race on the slice backing array
 		sess.mu.Lock()
-		newEvents := sess.buffer[sent:]
-		done := sess.done && sent >= len(sess.buffer)
+		available := sess.buffer[sent:]
+		batch := make([]GraphEvent, len(available))
+		copy(batch, available)
+		done := sess.done && len(available) == 0
 		sess.mu.Unlock()
 
-		for _, evt := range newEvents {
+		for _, evt := range batch {
 			if err := conn.WriteJSON(evt); err != nil {
 				log.Printf("WebSocket write error: %v", err)
 				return

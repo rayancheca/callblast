@@ -5,14 +5,35 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
+// validRef matches safe git ref names: branch names, SHAs, HEAD~N, HEAD^, etc.
+var validRef = regexp.MustCompile(`^[a-zA-Z0-9._/\-~^@{}:]+$`)
+
+// validateRef returns an error if the ref contains characters that could be
+// used to inject unexpected arguments into git commands.
+func validateRef(ref string) error {
+	if ref == "" {
+		return fmt.Errorf("ref must not be empty")
+	}
+	if !validRef.MatchString(ref) {
+		return fmt.Errorf("ref contains invalid characters: %q", ref)
+	}
+	return nil
+}
+
 // ChangedFiles returns the list of files changed between base and head.
 func ChangedFiles(repoPath, base, head string) ([]string, error) {
+	if err := validateRef(base); err != nil {
+		return nil, fmt.Errorf("invalid base ref: %w", err)
+	}
+	if err := validateRef(head); err != nil {
+		return nil, fmt.Errorf("invalid head ref: %w", err)
+	}
 	out, err := gitCmd(repoPath, "diff", "--name-only", base+"..."+head)
 	if err != nil {
-		// Fallback: two-dot diff
 		out, err = gitCmd(repoPath, "diff", "--name-only", base+".."+head)
 		if err != nil {
 			return nil, fmt.Errorf("git diff: %w", err)
@@ -24,9 +45,16 @@ func ChangedFiles(repoPath, base, head string) ([]string, error) {
 // FileAtRef returns the content of a file at a specific git ref.
 // Returns nil, nil if the file doesn't exist at that ref.
 func FileAtRef(repoPath, ref, path string) ([]byte, error) {
-	out, err := gitCmd(repoPath, "show", ref+":"+path)
+	if err := validateRef(ref); err != nil {
+		return nil, fmt.Errorf("invalid ref: %w", err)
+	}
+	// path must be relative and not escape the repo root
+	clean := filepath.Clean(path)
+	if filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
+		return nil, fmt.Errorf("path must be relative and within the repo: %q", path)
+	}
+	out, err := gitCmd(repoPath, "show", ref+":"+clean)
 	if err != nil {
-		// File may not exist at this ref (new file)
 		return nil, nil
 	}
 	return out, nil
@@ -57,19 +85,6 @@ func RepoRoot(path string) (string, error) {
 	lines := parseLines(out)
 	if len(lines) == 0 {
 		return "", fmt.Errorf("could not determine repo root")
-	}
-	return lines[0], nil
-}
-
-// HeadRef returns the current HEAD ref (branch name or commit hash).
-func HeadRef(repoPath string) (string, error) {
-	out, err := gitCmd(repoPath, "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil {
-		return "", err
-	}
-	lines := parseLines(out)
-	if len(lines) == 0 {
-		return "", fmt.Errorf("empty HEAD ref")
 	}
 	return lines[0], nil
 }

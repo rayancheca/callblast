@@ -1,8 +1,11 @@
 package analysis
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,16 +19,25 @@ import (
 )
 
 // RunAnalysis executes the full pipeline and streams graph events to the channel.
-func RunAnalysis(req server.AnalysisRequest, events chan<- server.GraphEvent) {
+// It closes the events channel when complete.
+func RunAnalysis(ctx context.Context, req server.AnalysisRequest, events chan<- server.GraphEvent) {
 	defer close(events)
 	start := time.Now()
 
 	emit := func(evtType server.GraphEventType, payload interface{}) {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		raw, err := json.Marshal(payload)
 		if err != nil {
 			return
 		}
-		events <- server.GraphEvent{Type: evtType, Payload: raw}
+		select {
+		case events <- server.GraphEvent{Type: evtType, Payload: raw}:
+		case <-ctx.Done():
+		}
 	}
 
 	emitProgress := func(stage, msg string, pct int) {
@@ -36,7 +48,6 @@ func RunAnalysis(req server.AnalysisRequest, events chan<- server.GraphEvent) {
 		emit(server.EventError, server.ErrorPayload{Message: msg})
 	}
 
-	// Resolve repo path
 	repoPath := req.RepoPath
 	if repoPath == "" {
 		repoPath = "."
@@ -48,6 +59,11 @@ func RunAnalysis(req server.AnalysisRequest, events chan<- server.GraphEvent) {
 	}
 	if _, err := os.Stat(filepath.Join(repoPath, ".git")); err != nil {
 		emitErr("not a git repository: " + repoPath)
+		return
+	}
+
+	if err := ctx.Err(); err != nil {
+		emitErr("analysis cancelled")
 		return
 	}
 
@@ -65,6 +81,10 @@ func RunAnalysis(req server.AnalysisRequest, events chan<- server.GraphEvent) {
 
 	emitProgress("parse", fmt.Sprintf("Parsing %d changed files…", len(changedFiles)), 15)
 
+	if err := ctx.Err(); err != nil {
+		return
+	}
+
 	// Extract functions from changed files (base vs head)
 	var allChanges []ast.SemanticChange
 	for _, relPath := range changedFiles {
@@ -75,11 +95,18 @@ func RunAnalysis(req server.AnalysisRequest, events chan<- server.GraphEvent) {
 
 		absPath := filepath.Join(repoPath, relPath)
 
-		baseSrc, _ := gitutil.FileAtRef(repoPath, req.BaseBranch, relPath)
-		headSrc, _ := os.ReadFile(absPath)
+		baseSrc, baseErr := gitutil.FileAtRef(repoPath, req.BaseBranch, relPath)
+		if baseErr != nil {
+			log.Printf("warn: could not read %s at %s: %v", relPath, req.BaseBranch, baseErr)
+		}
 
-		baseFuncs := extractFunctions(relPath, absPath, baseSrc, ext)
-		headFuncs := extractFunctions(relPath, absPath, headSrc, ext)
+		headSrc, headErr := os.ReadFile(absPath)
+		if headErr != nil && !errors.Is(headErr, os.ErrNotExist) {
+			log.Printf("warn: could not read %s: %v", absPath, headErr)
+		}
+
+		baseFuncs := extractFunctions(absPath, baseSrc, ext)
+		headFuncs := extractFunctions(absPath, headSrc, ext)
 
 		changes := diff.DiffFunctions(baseFuncs, headFuncs)
 		allChanges = append(allChanges, changes...)
@@ -92,28 +119,38 @@ func RunAnalysis(req server.AnalysisRequest, events chan<- server.GraphEvent) {
 
 	emitProgress("callgraph", fmt.Sprintf("Building call graph (%d changes detected)…", len(allChanges)), 35)
 
-	// Build call graph from ALL source files
+	if err := ctx.Err(); err != nil {
+		return
+	}
+
 	allFiles, err := gitutil.AllSourceFiles(repoPath)
 	if err != nil {
 		emitErr("failed to enumerate source files: " + err.Error())
 		return
 	}
 
-	cg, err := graph.BuildFromFiles(repoPath, allFiles)
-	if err != nil {
-		emitErr("call graph construction failed: " + err.Error())
+	cg, buildErrs := graph.BuildFromFiles(repoPath, allFiles)
+	if len(buildErrs) > 0 {
+		log.Printf("warn: %d files failed to parse during call graph construction", len(buildErrs))
+		for _, be := range buildErrs {
+			log.Printf("  %v", be)
+		}
+	}
+	if cg == nil {
+		emitErr("call graph construction failed")
 		return
 	}
 
 	emitProgress("bfs", "Computing blast radius…", 60)
 
-	// BFS reachability
 	result := graph.ComputeBlastRadius(cg, allChanges)
 
 	emitProgress("stream", "Streaming results…", 75)
 
-	// Stream nodes
 	for _, node := range result.Nodes {
+		if err := ctx.Err(); err != nil {
+			return
+		}
 		changeTypeStr := ""
 		if node.IsOrigin {
 			changeTypeStr = string(node.ChangeType)
@@ -137,7 +174,6 @@ func RunAnalysis(req server.AnalysisRequest, events chan<- server.GraphEvent) {
 		})
 	}
 
-	// Stream edges
 	for _, edge := range result.Edges {
 		emit(server.EventEdge, server.GraphEdgePayload{
 			Source:    edge.Source,
@@ -157,7 +193,7 @@ func RunAnalysis(req server.AnalysisRequest, events chan<- server.GraphEvent) {
 	})
 }
 
-func extractFunctions(relPath, absPath string, src []byte, ext string) []ast.FunctionDef {
+func extractFunctions(absPath string, src []byte, ext string) []ast.FunctionDef {
 	if src == nil {
 		return nil
 	}
@@ -170,6 +206,7 @@ func extractFunctions(relPath, absPath string, src []byte, ext string) []ast.Fun
 		funcs, _, err = ast.ExtractTSFile(absPath, src)
 	}
 	if err != nil {
+		log.Printf("warn: failed to extract functions from %s: %v", absPath, err)
 		return nil
 	}
 	return funcs

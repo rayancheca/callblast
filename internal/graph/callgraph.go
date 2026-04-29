@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -122,14 +123,17 @@ func (cg *CallGraph) AllFunctions() []string {
 }
 
 // BuildFromFiles builds a call graph from a set of source files.
-func BuildFromFiles(repoPath string, filePaths []string) (*CallGraph, error) {
+// Returns the graph along with any non-fatal parse errors encountered.
+func BuildFromFiles(repoPath string, filePaths []string) (*CallGraph, []error) {
 	cg := NewCallGraph()
 	var allCalls []ast.CallSite
+	var errs []error
 
 	for _, relPath := range filePaths {
 		absPath := filepath.Join(repoPath, relPath)
 		src, err := os.ReadFile(absPath)
 		if err != nil {
+			errs = append(errs, fmt.Errorf("read %s: %w", relPath, err))
 			continue
 		}
 
@@ -142,8 +146,11 @@ func BuildFromFiles(repoPath string, filePaths []string) (*CallGraph, error) {
 			funcs, calls, err = ast.ExtractGoFile(absPath, src)
 		case ".ts", ".tsx", ".js", ".jsx":
 			funcs, calls, err = ast.ExtractTSFile(absPath, src)
+		default:
+			continue
 		}
 		if err != nil {
+			errs = append(errs, fmt.Errorf("parse %s: %w", relPath, err))
 			continue
 		}
 
@@ -158,7 +165,7 @@ func BuildFromFiles(repoPath string, filePaths []string) (*CallGraph, error) {
 		cg.AddCall(call)
 	}
 
-	return cg, nil
+	return cg, errs
 }
 
 func fileFromQName(qname string) string {

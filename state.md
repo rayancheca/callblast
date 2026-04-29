@@ -8,34 +8,43 @@ callblast — Finds every function your PR will actually break before your teamm
 1
 
 ## Completed steps
-- Read all rule files and project spec
-- Updated CLAUDE.md with full technical specification
+1. Read all rule files and full project specification
+2. Updated CLAUDE.md with complete technical spec including visual direction
+3. Set up Go module with gorilla/websocket dependency
+4. Created full directory structure (cmd/, internal/*, web/src/*)
+5. Implemented internal/ast/types.go — FunctionDef, CallSite, SemanticChange types
+6. Implemented internal/ast/go_extract.go — Go AST extraction via go/ast
+7. Implemented internal/ast/ts_extract.go — TypeScript function extraction via regex
+8. Implemented internal/gitutil/git.go — git diff, show, ls-files with ref validation
+9. Implemented internal/diff/semantic.go — semantic diff: ADDED/REMOVED/SIG/BODY/RENAMED
+10. Implemented internal/graph/callgraph.go — directed call graph with short-name resolution
+11. Implemented internal/graph/bfs.go — BFS reachability, impact scoring, critical-path detection
+12. Implemented internal/analysis/analyzer.go — full pipeline orchestrator with context/cancellation
+13. Implemented internal/server/types.go + server.go — HTTP + WebSocket server with semaphore limit
+14. Implemented cmd/callblast/main.go — CLI entry point
+15. Implemented web frontend: tokens.css, global.css, types/index.ts
+16. Implemented useAnalysis.ts hook (WebSocket + state management)
+17. Implemented Header.tsx, AnalysisForm.tsx, BlastGraph.tsx (D3 force-directed), NodeDetail.tsx, ImpactList.tsx
+18. Implemented App.tsx — layout orchestrator
+19. Written 11 tests across ast, diff, graph, analysis, server packages — all pass with -race
+20. Written README.md with architecture, technical deep-dive, install instructions
+21. Security review: fixed CRITICAL data race, ref injection, goroutine leak, added concurrency limit
+22. All tests pass: go test ./... -race -timeout 30s
 
 ## In progress
-Step 1 — Go module + HTTP server skeleton
+Final polish + push to GitHub
 
 ## Next steps
-1. Create go.mod, go.sum, internal packages, cmd/callblast/main.go
-2. Step 2 — AST types + Go extractor (go/ast)
-3. Step 3 — Git integration (git diff, git show, git ls-files)
-4. Step 4 — Semantic diff engine
-5. Step 5 — Call graph construction
-6. Step 6 — BFS reachability
-7. Step 7 — Analysis orchestrator
-8. Step 8 — WebSocket server
-9. Step 9 — Frontend setup
-10. Step 10 — AnalysisForm
-11. Step 11 — D3 blast graph
-12. Step 12 — NodeDetail panel
-13. Step 13 — ImpactList
-14. Step 14 — Polish + README
+1. Push to GitHub: git push origin main
+2. Update project_history.md
 
 ## Blockers
 None
 
 ## Notes
-Visual direction: dark precision analytics — graph is the hero, amber=changed, red=critical-path.
-Go backend uses go/ast (no CGO). WebSocket for real-time streaming.
+Visual direction: dark precision analytics — amber=#f59e0b changed nodes, red=#dc2626 critical-path pulse
+Architecture: go/ast → semantic diff → call graph → BFS → WebSocket stream → D3 force simulation
+All security issues from reviewer fixed: ref validation, data race copy, context cancellation, semaphore limit
 
 ## Git log
-No commits yet.
+a3871cc feat: initial implementation of CallBlast PR blast-radius analyzer
